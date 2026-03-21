@@ -1,0 +1,62 @@
+name: Deploy
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      # TODO: remove the next 3 steps if your project has no frontend
+      - name: Setup Node.js
+        if: ${{ hashFiles('web/package-lock.json') != '' }}
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22.x
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install frontend dependencies
+        if: ${{ hashFiles('web/package-lock.json') != '' }}
+        working-directory: ./web
+        run: npm ci
+
+      - name: Build frontend
+        if: ${{ hashFiles('web/package-lock.json') != '' }}
+        working-directory: ./web
+        run: npm run build
+
+      # TODO: remove this step if your project has no frontend
+      - name: Deploy frontend to Hostinger
+        if: ${{ hashFiles('web/dist') != '' }}
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.HOSTINGER_HOST }}
+          username: ${{ secrets.HOSTINGER_USER }}
+          key: ${{ secrets.HOSTINGER_SSH_KEY }}
+          port: 65002
+          source: "web/dist/*"
+          target: /home/${{ secrets.HOSTINGER_USER }}/domains/your-domain.com/public_html
+          strip_components: 2
+
+      - name: Deploy backend to Hostinger
+        uses: appleboy/ssh-action@v1.1.0
+        with:
+          host: ${{ secrets.HOSTINGER_HOST }}
+          username: ${{ secrets.HOSTINGER_USER }}
+          key: ${{ secrets.HOSTINGER_SSH_KEY }}
+          port: 65002
+          script: |
+            # TODO: update this path to your project's location on the server
+            cd /home/${{ secrets.HOSTINGER_USER }}/domains/your-domain.com/public_html
+            git fetch origin main
+            git reset --hard origin/main
+            COMPOSER_PROCESS_TIMEOUT=600 composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist
+            php artisan optimize:clear
+            php artisan optimize
+            php artisan migrate --force
